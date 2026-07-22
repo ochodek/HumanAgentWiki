@@ -12,15 +12,19 @@ from common import connect, embed, MCP_HOST, MCP_PORT
 
 mcp = FastMCP("humanagentwiki", host=MCP_HOST, port=MCP_PORT)
 
-COLS = "id, file, category, node_type, title, links, text"
+COLS = "id, file, category, node_type, title, links, text, meta"
 
 
-def _filters(category, node_type):
+def _filters(category, node_type, memory_status, memory_scope):
     clauses, params = [], []
     if category:
         clauses.append("category = %s"); params.append(category)
     if node_type:
         clauses.append("node_type = %s"); params.append(node_type)
+    if memory_status:
+        clauses.append("meta->>'memory_status' = %s"); params.append(memory_status)
+    if memory_scope:
+        clauses.append("meta->>'memory_scope' = %s"); params.append(memory_scope)
     return (" AND " + " AND ".join(clauses)) if clauses else "", params
 
 
@@ -28,14 +32,15 @@ def _hit(row):
     text = row["text"]
     return dict(id=row["id"], file=row["file"], category=row["category"],
                 node_type=row["node_type"], title=row["title"], links=row["links"],
+                meta=row["meta"],
                 snippet=text[:400] + ("..." if len(text) > 400 else ""))
 
 
-def search(query, k=8, category="", node_type=""):
+def search(query, k=8, category="", node_type="", memory_status="", memory_scope=""):
     """Hybrid semantic + keyword search with Reciprocal Rank Fusion. A plain
     function so both the MCP tool and the CLI can call it."""
     qvec = embed(query)[0]
-    fcl, fparams = _filters(category, node_type)
+    fcl, fparams = _filters(category, node_type, memory_status, memory_scope)
     pool = max(k * 4, 30)
     conn = connect()
     cur = conn.cursor(row_factory=dict_row)
@@ -59,11 +64,13 @@ def search(query, k=8, category="", node_type=""):
 
 
 @mcp.tool()
-def brain_search(query: str, k: int = 8, category: str = "", node_type: str = "") -> list:
+def brain_search(query: str, k: int = 8, category: str = "", node_type: str = "",
+                 memory_status: str = "", memory_scope: str = "") -> list:
     """Hybrid semantic + keyword search over the notes.
     query: search text (any language). k: number of results.
-    category / node_type: optional filters. Returns ranked notes with a snippet."""
-    return search(query, k, category, node_type)
+    category / node_type / memory_status / memory_scope: optional filters.
+    Returns ranked notes with provenance and a snippet."""
+    return search(query, k, category, node_type, memory_status, memory_scope)
 
 
 @mcp.tool()
@@ -71,7 +78,7 @@ def brain_get(title_or_file: str) -> list:
     """Return the full text of notes by exact title or file path."""
     conn = connect()
     cur = conn.cursor(row_factory=dict_row)
-    cur.execute("SELECT file, category, node_type, title, links, text FROM chunks "
+    cur.execute("SELECT file, category, node_type, title, links, text, meta FROM chunks "
                 "WHERE title = %s OR file = %s LIMIT 25", (title_or_file, title_or_file))
     out = [dict(row) for row in cur.fetchall()]
     conn.close()

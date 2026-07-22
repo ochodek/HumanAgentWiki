@@ -11,6 +11,7 @@
 import os
 import sys
 import argparse
+import json
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -32,7 +33,17 @@ def cmd_index(args):
 
 def cmd_search(args):
     from server import search
-    rows = search(args.query, k=args.k)
+    rows = search(
+        args.query,
+        k=args.k,
+        category=args.category,
+        node_type=args.node_type,
+        memory_status=args.memory_status,
+        memory_scope=args.memory_scope,
+    )
+    if args.json:
+        print(json.dumps(rows, ensure_ascii=False))
+        return
     if not rows:
         print("(no results)"); return
     for r in rows:
@@ -57,15 +68,28 @@ def cmd_selftest(_):
     sys.exit(selftest.run())
 
 
-def main():
+def build_parser():
     p = argparse.ArgumentParser(prog="humanagentwiki")
     sub = p.add_subparsers(dest="cmd", required=True)
     sub.add_parser("init-db").set_defaults(fn=cmd_init_db)
     pi = sub.add_parser("index"); pi.add_argument("--full", action="store_true"); pi.set_defaults(fn=cmd_index)
-    ps = sub.add_parser("search"); ps.add_argument("query"); ps.add_argument("-k", type=int, default=8); ps.set_defaults(fn=cmd_search)
+    ps = sub.add_parser("search")
+    ps.add_argument("query")
+    ps.add_argument("-k", type=int, default=8)
+    ps.add_argument("--category", default="")
+    ps.add_argument("--node-type", default="")
+    ps.add_argument("--memory-status", default="")
+    ps.add_argument("--memory-scope", default="")
+    ps.add_argument("--json", action="store_true")
+    ps.set_defaults(fn=cmd_search)
     sub.add_parser("serve").set_defaults(fn=cmd_serve)
     pw = sub.add_parser("web"); pw.add_argument("--port", type=int, default=None); pw.set_defaults(fn=cmd_web)
     sub.add_parser("selftest").set_defaults(fn=cmd_selftest)
+    return p
+
+
+def main():
+    p = build_parser()
     args = p.parse_args()
     args.fn(args)
 

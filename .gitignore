@@ -13,5 +13,9 @@ venv/
 *.log
 state/
 
+# Private local knowledge and agent coordination
+/notes/
+/.oacp
+
 # OS
 .DS_Store

@@ -36,11 +36,29 @@ def test_split_blocks_on_headings():
 
 def test_category_of():
     assert index.category_of(os.path.join("Books", "x.md")) == "Books"
-    assert index.category_of("root.md") == "uncategorized"
+    assert index.category_of("root.md") == os.path.basename(index.NOTES_DIR.rstrip(os.sep))
 
 
 def test_link_regex():
     assert index.LINK_RE.findall("see [[Alpha]] and [[Beta]]") == ["Alpha", "Beta"]
+
+
+def test_prepare_files_fails_before_embedding_when_any_note_is_invalid(monkeypatch):
+    processed = []
+
+    def process_file(path):
+        processed.append(path)
+        if path == "bad.md":
+            raise UnicodeError("invalid note")
+        return [{"emb_text": "valid"}]
+
+    monkeypatch.setattr(index, "process_file", process_file)
+    monkeypatch.setattr(index, "embed", lambda *_args, **_kwargs: pytest.fail("embed must not run"))
+
+    with pytest.raises(UnicodeError, match="invalid note"):
+        index.prepare_files(["good.md", "bad.md"])
+
+    assert processed == ["good.md", "bad.md"]
 
 
 # ---------- web.py ----------

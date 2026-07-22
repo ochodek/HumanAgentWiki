@@ -151,22 +151,23 @@ def file_hash(path):
     return h.hexdigest()
 
 
-def reindex_files(cur, abs_files):
-    """Delete old chunks for these files and insert freshly embedded ones."""
+def prepare_files(abs_files):
+    """Parse and embed every file before any database state is changed."""
     rels = [os.path.relpath(p, NOTES_DIR) for p in abs_files]
     chunks = []
     for p in abs_files:
-        try:
-            chunks += process_file(p)
-        except Exception as e:
-            print("  error", p, e)
+        chunks += process_file(p)
+    vecs = embed([c['emb_text'] for c in chunks], batch_size=8) if chunks else []
+    return rels, chunks, vecs
+
+
+def replace_files(cur, rels, chunks, vecs):
+    """Replace prepared chunks inside the caller's database transaction."""
     if rels:
         cur.execute("DELETE FROM chunks WHERE file = ANY(%s)", (rels,))
-    if chunks:
-        vecs = embed([c['emb_text'] for c in chunks], batch_size=8)
-        for c, v in zip(chunks, vecs):
-            cur.execute(INSERT_SQL, (c['file'], c['category'], c['node_type'], c['title'],
-                                     c['links'], c['tags'], c['text'], c['meta'], v, c['text']))
+    for c, v in zip(chunks, vecs):
+        cur.execute(INSERT_SQL, (c['file'], c['category'], c['node_type'], c['title'],
+                                 c['links'], c['tags'], c['text'], c['meta'], v, c['text']))
     return len(chunks)
 
 
@@ -176,33 +177,39 @@ def run(full=False):
     disk = {os.path.relpath(p, NOTES_DIR): p for p in abs_files}
     disk_hash = {rel: file_hash(p) for rel, p in disk.items()}
 
+    removed = []
     if full:
         print("Full rebuild...")
-        cur.execute("TRUNCATE chunks RESTART IDENTITY")
-        cur.execute("TRUNCATE files")
         changed = sorted(disk)
     else:
         cur.execute("SELECT file, hash FROM files")
         db_hash = dict(cur.fetchall())
         changed = [r for r in disk if disk_hash[r] != db_hash.get(r)]
         removed = [r for r in db_hash if r not in disk]
-        if removed:
-            cur.execute("DELETE FROM chunks WHERE file = ANY(%s)", (removed,))
-            cur.execute("DELETE FROM files  WHERE file = ANY(%s)", (removed,))
-            print(f"Removed {len(removed)} deleted file(s).")
         print(f"Files: {len(disk)} | changed/new: {len(changed)} | "
               f"unchanged: {len(disk) - len(changed)} (skipped)")
 
-    if not changed:
+    if not full and not changed and not removed:
         print("Nothing to do."); conn.close(); return
 
     t0 = time.time()
-    print(f"Embedding {len(changed)} file(s)...")
-    n = reindex_files(cur, [disk[r] for r in changed])
-    for r in changed:
-        cur.execute("""INSERT INTO files (file, hash, updated_at) VALUES (%s, %s, now())
-                       ON CONFLICT (file) DO UPDATE SET hash = EXCLUDED.hash, updated_at = now()""",
-                    (r, disk_hash[r]))
+    if changed:
+        print(f"Embedding {len(changed)} file(s)...")
+    rels, chunks, vecs = prepare_files([disk[r] for r in changed])
+    with conn.transaction():
+        if full:
+            cur.execute("TRUNCATE chunks RESTART IDENTITY")
+            cur.execute("TRUNCATE files")
+        elif removed:
+            cur.execute("DELETE FROM chunks WHERE file = ANY(%s)", (removed,))
+            cur.execute("DELETE FROM files  WHERE file = ANY(%s)", (removed,))
+        n = replace_files(cur, rels, chunks, vecs)
+        for r in changed:
+            cur.execute("""INSERT INTO files (file, hash, updated_at) VALUES (%s, %s, now())
+                           ON CONFLICT (file) DO UPDATE SET hash = EXCLUDED.hash, updated_at = now()""",
+                        (r, disk_hash[r]))
+    if removed:
+        print(f"Removed {len(removed)} deleted file(s).")
     cur.execute("SELECT count(*) FROM chunks")
     print(f"  done in {time.time() - t0:.1f}s - {n} chunks written, {cur.fetchone()[0]} total in index.")
     conn.close()
