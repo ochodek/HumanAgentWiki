@@ -106,6 +106,14 @@ pip install -r requirements-dev.txt
 pytest        # unit tests for the pure helpers (no DB needed)
 ```
 
+## Persistent macOS runtime
+
+The repository includes `scripts/ensure-runtime.sh` and a launchd template in
+`ops/com.jarvis.humanagentwiki.runtime.plist`. The watchdog checks the real
+Colima VM state, reconciles the PostgreSQL container, waits for `pg_isready`,
+and restarts the MCP LaunchAgent when its local port is unavailable. It uses
+finite retries and does not recreate or delete the PostgreSQL volume.
+
 ## On the roadmap
 
 See [ROADMAP.md](ROADMAP.md).

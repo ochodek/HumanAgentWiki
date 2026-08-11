@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.jarvis.humanagentwiki.runtime</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/jarvis/humanagentwiki/scripts/ensure-runtime.sh</string>
+  </array>
+  <key>WorkingDirectory</key>
+  <string>/Users/jarvis/humanagentwiki</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>HOME</key>
+    <string>/Users/jarvis</string>
+    <key>PATH</key>
+    <string>/opt/homebrew/bin:/opt/homebrew/sbin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>StartInterval</key>
+  <integer>60</integer>
+  <key>ProcessType</key>
+  <string>Background</string>
+  <key>StandardOutPath</key>
+  <string>/Users/jarvis/Library/Logs/HumanAgentWiki/runtime.stdout.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/jarvis/Library/Logs/HumanAgentWiki/runtime.stderr.log</string>
+</dict>
+</plist>
