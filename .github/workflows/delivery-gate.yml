@@ -1,0 +1,58 @@
+name: Delivery gate
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test-and-browser-gate:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_DB: humanagentwiki
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d humanagentwiki"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/humanagentwiki
+      HF_HUB_OFFLINE: "1"
+      TRANSFORMERS_OFFLINE: "1"
+      TOKENIZERS_PARALLELISM: "false"
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies and Chromium
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+          python -m playwright install --with-deps chromium
+      - name: Initialize disposable database
+        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f schema.sql
+      - name: Run full unit suite
+        run: python -m pytest
+      - name: Run production browser delivery gate
+        run: |
+          notes_dir="$(mktemp -d)"
+          trap 'kill "$web_pid" 2>/dev/null || true; rm -rf "$notes_dir"' EXIT
+          NOTES_DIR="$notes_dir" python cli.py web --port 8808 > web.log 2>&1 &
+          web_pid=$!
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error http://127.0.0.1:8808/static/index.html >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl --fail --silent --show-error http://127.0.0.1:8808/static/index.html >/dev/null
+          HAW_BROWSER_BASE_URL=http://127.0.0.1:8808 python -m pytest tests/test_browser_gate.py

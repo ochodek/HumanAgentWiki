@@ -318,40 +318,51 @@ if [ "$(lc "$want")" = "y" ]; then
       tmp="$(mktemp)"; sed "s#^WEB_AUTH=.*#WEB_AUTH=$cred#" .env > "$tmp" && mv "$tmp" .env
     else echo "WEB_AUTH=$cred" >> .env; fi
     ok "web UI protected (login: $u / password hidden)"
-  else warn "username or password empty - left open"; fi
+  else
+    if [ "$WEB_HOST_VAL" = "0.0.0.0" ]; then
+      WEB_HOST_VAL="127.0.0.1"
+      tmp="$(mktemp)"; sed "s#^WEB_HOST=.*#WEB_HOST=$WEB_HOST_VAL#" .env > "$tmp" && mv "$tmp" .env
+      warn "username or password empty - web UI restricted to localhost"
+    else
+      warn "username or password empty - left open on localhost only"
+    fi
+  fi
 else
   # "no password" must really mean open: strip any WEB_AUTH left by a previous run.
   if grep -q '^WEB_AUTH=' .env 2>/dev/null; then
     tmp="$(mktemp)"; grep -v '^WEB_AUTH=' .env > "$tmp" && mv "$tmp" .env
   fi
-  warn "web UI left open (no password)"
+  if [ "$WEB_HOST_VAL" = "0.0.0.0" ]; then
+    WEB_HOST_VAL="127.0.0.1"
+    tmp="$(mktemp)"; sed "s#^WEB_HOST=.*#WEB_HOST=$WEB_HOST_VAL#" .env > "$tmp" && mv "$tmp" .env
+    warn "web UI without a password is restricted to localhost"
+  else
+    warn "web UI left open on localhost only"
+  fi
 fi
 chmod 600 .env 2>/dev/null || true
 
 # 12) (re)start it so the CURRENT config (model, host, auth) actually applies -
 step "Starting HumanAgentWiki"
-# Always restart: a running server still holds the OLD env (e.g. a previous password), so a
-# re-run must kill + relaunch, not skip, or config changes silently don't take effect.
-pkill -f "cli.py serve" 2>/dev/null || true
-pkill -f "cli.py web"   2>/dev/null || true
-# Wait until the old processes are really gone so their ports are free — a too-short sleep let the
-# new web hit "address already in use" and exit immediately.
-for _ in $(seq 1 15); do
-  if pgrep -f "cli.py serve" >/dev/null 2>&1 || pgrep -f "cli.py web" >/dev/null 2>&1; then sleep 1; else break; fi
-done
-# Re-load .env so the FINAL config (WEB_HOST / WEB_AUTH chosen by the prompts above) is in the
-# environment the servers inherit. An earlier `set -a; . ./.env` baked stale defaults (notably
-# WEB_HOST=127.0.0.1) into this shell; since ./haw only sets vars NOT already in the environment,
-# that stale value would otherwise shadow the updated file and the web would bind to localhost
-# even when the user chose "visible from outside".
-set -a; . ./.env; set +a
-( nohup ./haw serve >/tmp/haw-serve.log 2>&1 </dev/null & disown ) 2>/dev/null || true
-( nohup ./haw web   >/tmp/haw-web.log   2>&1 </dev/null & disown ) 2>/dev/null || true
-sleep 3
-if pgrep -f "cli.py web" >/dev/null 2>&1; then
-  ok "MCP server + web UI (re)started (logs: /tmp/haw-serve.log, /tmp/haw-web.log)"
+if [ "$(uname -s)" = "Darwin" ]; then
+  ./scripts/install-launch-agents.sh
+  ok "MCP server, web UI, and watchdog installed as persistent LaunchAgents"
 else
-  warn "web didn't stay up - check /tmp/haw-web.log, then: cd $DIR && nohup ./haw web >/tmp/haw-web.log 2>&1 &"
+  # Always restart so a running server cannot retain old configuration.
+  pkill -f "cli.py serve" 2>/dev/null || true
+  pkill -f "cli.py web"   2>/dev/null || true
+  for _ in $(seq 1 15); do
+    if pgrep -f "cli.py serve" >/dev/null 2>&1 || pgrep -f "cli.py web" >/dev/null 2>&1; then sleep 1; else break; fi
+  done
+  set -a; . ./.env; set +a
+  ( nohup ./haw serve >/tmp/haw-serve.log 2>&1 </dev/null & disown ) 2>/dev/null || true
+  ( nohup ./haw web   >/tmp/haw-web.log   2>&1 </dev/null & disown ) 2>/dev/null || true
+  sleep 3
+  if pgrep -f "cli.py web" >/dev/null 2>&1; then
+    ok "MCP server + web UI (re)started (logs: /tmp/haw-serve.log, /tmp/haw-web.log)"
+  else
+    warn "web didn't stay up - check /tmp/haw-web.log"
+  fi
 fi
 # Reload running agents so they pick up the wiki MCP now (they only read MCP at startup).
 if [ "${any:-0}" = 1 ]; then
@@ -368,7 +379,9 @@ if [ "${any:-0}" = 1 ]; then
   command -v codex  >/dev/null 2>&1 && warn "Codex: restart its session to load the wiki (new sessions already have it)"
   command -v claude >/dev/null 2>&1 && warn "Claude: restart its session to load the wiki (new sessions already have it)"
 fi
-warn "for persistence after reboot, add './haw serve' and './haw web' to your boot/supervisor"
+if [ "$(uname -s)" != "Darwin" ]; then
+  warn "for persistence after reboot, add './haw serve' and './haw web' to your boot/supervisor"
+fi
 
 # done + link ---------------------------------------------------------------
 PRIMARY_IP="$(.venv/bin/python - <<'PYIP'

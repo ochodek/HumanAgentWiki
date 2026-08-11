@@ -12,6 +12,7 @@ venv/
 # Logs / state
 *.log
 state/
+.playwright-cli/
 
 # Private local knowledge and agent coordination
 /notes/

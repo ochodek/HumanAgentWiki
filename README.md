@@ -108,11 +108,24 @@ pytest        # unit tests for the pure helpers (no DB needed)
 
 ## Persistent macOS runtime
 
-The repository includes `scripts/ensure-runtime.sh` and a launchd template in
-`ops/com.jarvis.humanagentwiki.runtime.plist`. The watchdog checks the real
-Colima VM state, reconciles the PostgreSQL container, waits for `pg_isready`,
-and restarts the MCP LaunchAgent when its local port is unavailable. It uses
-finite retries and does not recreate or delete the PostgreSQL volume.
+The repository includes `scripts/ensure-runtime.sh` and launchd templates in
+`ops/`. Separate persistent LaunchAgents run the MCP server and web UI. The
+watchdog checks the real Colima VM state, reconciles the PostgreSQL container,
+waits for `pg_isready`, and restarts either interface when its local port is
+unavailable. It uses finite retries, verifies each restarted port before
+reporting a healthy runtime, and does not recreate or delete the PostgreSQL
+volume.
+
+On macOS, install or refresh all three services with:
+
+```bash
+./scripts/install-launch-agents.sh
+```
+
+The installer renders the current checkout path into the templates, loads the
+services for the current user, and starts them. They start automatically after
+that user logs in. PostgreSQL is published only on localhost; the web UI can
+still bind to a LAN or Tailscale interface through `WEB_HOST`.
 
 ## On the roadmap
 

@@ -63,6 +63,8 @@ if WEB_AUTH:
 
     @app.middleware("http")
     async def _basic_auth(request, call_next):
+        if request.url.path == "/healthz":
+            return await call_next(request)
         ok = False
         hdr = request.headers.get("authorization", "")
         if hdr.startswith("Basic "):
@@ -75,6 +77,14 @@ if WEB_AUTH:
             return _Response(status_code=401,
                              headers={"WWW-Authenticate": 'Basic realm="HumanAgentWiki"'})
         return await call_next(request)
+
+
+@app.get("/healthz")
+def healthz():
+    conn = connect()
+    conn.execute("SELECT 1")
+    conn.close()
+    return {"service": "HumanAgentWiki", "status": "ok"}
 
 
 # ---------- helpers ----------

@@ -62,6 +62,22 @@ def test_prepare_files_fails_before_embedding_when_any_note_is_invalid(monkeypat
 
 
 # ---------- web.py ----------
+def test_health_endpoint_proves_database_readability(monkeypatch):
+    statements = []
+
+    class Connection:
+        def execute(self, statement):
+            statements.append(statement)
+
+        def close(self):
+            statements.append("closed")
+
+    monkeypatch.setattr(web, "connect", lambda: Connection())
+
+    assert web.healthz() == {"service": "HumanAgentWiki", "status": "ok"}
+    assert statements == ["SELECT 1", "closed"]
+
+
 def test_slugify():
     assert web.slugify("Hello, World!") == "hello-world"
     assert web.slugify("   ") == "note"
