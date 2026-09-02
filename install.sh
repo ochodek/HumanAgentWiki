@@ -146,9 +146,29 @@ elif command -v apt-get >/dev/null; then
   sudo apt-get update -qq >/dev/null 2>&1 || true
   sudo apt-get install -y postgresql postgresql-contrib >/dev/null 2>&1 || warn "postgres install hit an issue"
   PGMAJ="$(ls /usr/lib/postgresql/ 2>/dev/null | sort -n | tail -1)"
-  sudo apt-get install -y "postgresql-${PGMAJ}-pgvector" >/dev/null 2>&1 \
-    || sudo apt-get install -y postgresql-pgvector >/dev/null 2>&1 \
-    || warn "pgvector apt package not found - schema may fail (alternative: install Docker and re-run)"
+  install_pgvector() {
+    sudo apt-get install -y "postgresql-${PGMAJ}-pgvector" >/dev/null 2>&1 \
+      || sudo apt-get install -y postgresql-pgvector >/dev/null 2>&1
+  }
+  # Ubuntu only started shipping pgvector with 24.04, so on 22.04 - still the most common
+  # server image - neither package exists and the install died later at the schema step with
+  # "could not open extension control file .../vector.control". The extension IS published for
+  # every supported release in PostgreSQL's own apt repository, so add that and try again
+  # rather than sending people off to install Docker.
+  if ! install_pgvector; then
+    warn "pgvector not in the distro repos - adding PostgreSQL's official apt repository"
+    CODENAME="$(lsb_release -cs 2>/dev/null || . /etc/os-release 2>/dev/null && echo "${VERSION_CODENAME:-}")"
+    if [ -n "$CODENAME" ]; then
+      sudo install -d /usr/share/postgresql-common/pgdg 2>/dev/null || true
+      sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+        https://www.postgresql.org/media/keys/ACCC4CF8.asc >/dev/null 2>&1 || true
+      echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${CODENAME}-pgdg main" \
+        | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null 2>&1 || true
+      sudo apt-get update -qq >/dev/null 2>&1 || true
+    fi
+    install_pgvector \
+      || warn "pgvector still unavailable - schema will fail (alternative: install Docker and re-run)"
+  fi
   sudo systemctl enable --now postgresql >/dev/null 2>&1 || true
   ok "PostgreSQL installed"
 else
