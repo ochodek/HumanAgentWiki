@@ -81,6 +81,7 @@ def test_notes_remain_searchable_when_their_category_is_hidden_from_the_graph():
         ) as added:
             page.locator("#newcat").press("Enter")
         assert added.value.ok
+        expect(page.locator('#legend .lname', has_text="Gate fixture")).to_be_visible()
         page.locator("#newnote").click()
         page.locator("#edit-title").fill("Synthetic delivery note")
         page.locator("#edit-cat").select_option(label="Gate fixture")
