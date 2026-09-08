@@ -1,9 +1,9 @@
-"""Production browser smoke test for the empty HumanAgentWiki UI."""
+"""Production browser gate using only a disposable wiki."""
 import os
 from urllib.parse import urlsplit
 
 import pytest
-from playwright.sync_api import sync_playwright
+from playwright.sync_api import sync_playwright, expect
 
 
 EXPECTED_STATIC_ASSETS = {
@@ -12,8 +12,8 @@ EXPECTED_STATIC_ASSETS = {
 }
 
 
-def test_empty_wiki_ui_loads_without_browser_or_api_failures():
-    """An empty, disposable wiki must still render its heading and 3D graph."""
+def test_notes_remain_searchable_when_their_category_is_hidden_from_the_graph():
+    """Saving, hiding and restoring a category must preserve its searchable notes."""
     base_url = os.environ.get("HAW_BROWSER_BASE_URL")
     if not base_url:
         pytest.skip("browser gate requires HAW_BROWSER_BASE_URL")
@@ -68,12 +68,58 @@ def test_empty_wiki_ui_loads_without_browser_or_api_failures():
 
         page.on("response", record_response)
         page.on("requestfailed", record_failed_request)
-        response = page.goto(f"{base_url}/static/index.html", wait_until="networkidle")
+        response = page.goto(base_url, wait_until="networkidle")
 
         assert response is not None, "the UI entry point did not return a response"
         assert response.ok, f"the UI entry point returned HTTP {response.status}"
         assert page.locator("h1", has_text="HumanAgentWiki").count() == 1
         page.locator("#graph canvas").wait_for(state="attached", timeout=15_000)
+        page.locator("#leg-edit").click()
+        page.locator("#newcat").fill("Gate fixture")
+        with page.expect_response(
+            lambda response: response.url.endswith("/api/categories") and response.request.method == "POST"
+        ) as added:
+            page.locator("#newcat").press("Enter")
+        assert added.value.ok
+        page.locator("#newnote").click()
+        page.locator("#edit-title").fill("Synthetic delivery note")
+        page.locator("#edit-cat").select_option(label="Gate fixture")
+        page.locator("#edit-area").fill("A synthetic note for the production delivery gate.")
+        with page.expect_response(
+            lambda response: response.url.endswith("/api/note") and response.request.method == "POST",
+            timeout=180_000,
+        ) as saved:
+            page.locator("#edit-save").click()
+        assert saved.value.ok
+        note_file = saved.value.json()["file"]
+        expect(page.locator("#note-body")).to_contain_text("synthetic note", timeout=30_000)
+        graph = context.request.get(f"{base_url}/api/graph").json()
+        assert any(node["id"] == note_file for node in graph["nodes"])
+
+        toggle = page.locator('[data-gtog="Gate fixture"]')
+        with page.expect_response("**/api/category-graph") as hidden:
+            toggle.click()
+        assert hidden.value.ok
+        page.reload(wait_until="networkidle")
+        graph = context.request.get(f"{base_url}/api/graph").json()
+        assert not any(node["id"] == note_file for node in graph["nodes"])
+        page.locator("#search").fill("Synthetic delivery note")
+        result = page.locator("#results .res", has_text="Synthetic delivery note")
+        expect(result).to_be_visible(timeout=60_000)
+        result.click()
+        expect(page.locator("#note-body")).to_contain_text("synthetic note")
+        search = context.request.get(f"{base_url}/api/search", params={"q": "Synthetic delivery note"})
+        assert search.ok
+        assert any(hit["file"] == note_file and hit["updated"] for hit in search.json())
+
+        if page.locator('[data-gtog="Gate fixture"]').count() == 0:
+            page.locator("#leg-edit").click()
+        with page.expect_response("**/api/category-graph") as restored:
+            page.locator('[data-gtog="Gate fixture"]').click()
+        assert restored.value.ok
+        page.reload(wait_until="networkidle")
+        graph = context.request.get(f"{base_url}/api/graph").json()
+        assert any(node["id"] == note_file for node in graph["nodes"])
         assert EXPECTED_STATIC_ASSETS <= static_assets, (
             f"missing static assets: {sorted(EXPECTED_STATIC_ASSETS - static_assets)}"
         )

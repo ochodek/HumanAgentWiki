@@ -22,13 +22,13 @@ HumanAgentWiki turns *your own notes* (plain Markdown) into a shared, searchable
 One line:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/petrludwig-collab/HumanAgentWiki/main/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/ochodek/HumanAgentWiki/main/install.sh | bash
 ```
 
 Or clone and run the installer:
 
 ```bash
-git clone https://github.com/petrludwig-collab/HumanAgentWiki.git
+git clone https://github.com/ochodek/HumanAgentWiki.git
 cd HumanAgentWiki && ./install.sh
 ```
 

@@ -2,14 +2,17 @@
 #
 # HumanAgentWiki installer.
 #
-#   curl -fsSL https://raw.githubusercontent.com/petrludwig-collab/HumanAgentWiki/main/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/ochodek/HumanAgentWiki/main/install.sh | bash
 #
 # Overridable via env: HAW_DIR (install path), HAW_REPO (git url), HAW_DB (db name).
 set -euo pipefail
 
-REPO="${HAW_REPO:-https://github.com/petrludwig-collab/HumanAgentWiki.git}"
+REPO="${HAW_REPO:-https://github.com/ochodek/HumanAgentWiki.git}"
 DIR="${HAW_DIR:-$HOME/humanagentwiki}"
 DB="${HAW_DB:-humanagentwiki}"
+# Some shells (cron, minimal CI, non-login) don't export USER; without this, `set -u` aborts
+# with a cryptic "USER: unbound variable" right on the DB-role path before any helpful message.
+USER="${USER:-$(id -un)}"
 
 if [ -t 1 ]; then B=$'\033[1m'; G=$'\033[32m'; Y=$'\033[33m'; R=$'\033[31m'; C=$'\033[36m'; X=$'\033[0m'
 else B=; G=; Y=; R=; C=; X=; fi
@@ -143,14 +146,48 @@ elif command -v apt-get >/dev/null; then
   sudo apt-get update -qq >/dev/null 2>&1 || true
   sudo apt-get install -y postgresql postgresql-contrib >/dev/null 2>&1 || warn "postgres install hit an issue"
   PGMAJ="$(ls /usr/lib/postgresql/ 2>/dev/null | sort -n | tail -1)"
-  sudo apt-get install -y "postgresql-${PGMAJ}-pgvector" >/dev/null 2>&1 \
-    || sudo apt-get install -y postgresql-pgvector >/dev/null 2>&1 \
-    || warn "pgvector apt package not found - schema may fail (alternative: install Docker and re-run)"
+  :   # pgvector is handled below, for every native install - not only fresh ones
   sudo systemctl enable --now postgresql >/dev/null 2>&1 || true
   ok "PostgreSQL installed"
 else
   warn "No PostgreSQL, Docker, or apt - install PostgreSQL+pgvector manually, then re-run."
 fi
+# pgvector, for every native install - not just the one that installed Postgres itself.
+# This used to live inside the "no PostgreSQL found" branch, so anyone who already had
+# Postgres running (including anyone re-running after a failure) skipped it entirely and hit
+# "could not open extension control file .../vector.control" at the schema step.
+if [ "$DB_URL" = "dbname=$DB" ] && command -v apt-get >/dev/null; then
+  PGMAJ="$(ls /usr/lib/postgresql/ 2>/dev/null | sort -n | tail -1)"
+  if ! ls /usr/share/postgresql/*/extension/vector.control >/dev/null 2>&1; then
+    warn "pgvector extension missing - installing it"
+    install_pgvector() {
+      sudo apt-get install -y "postgresql-${PGMAJ}-pgvector" >/dev/null 2>&1 \
+        || sudo apt-get install -y postgresql-pgvector >/dev/null 2>&1
+    }
+    # Ubuntu only started shipping pgvector with 24.04, so on 22.04 - still the most common
+    # server image - neither package exists. The extension IS published for every supported
+    # release in PostgreSQL's own apt repository, so add that rather than sending people off
+    # to install Docker.
+    if ! install_pgvector; then
+      warn "not in the distro repos - adding PostgreSQL's official apt repository"
+      CODENAME="$(lsb_release -cs 2>/dev/null || { . /etc/os-release 2>/dev/null; echo "${VERSION_CODENAME:-}"; })"
+      if [ -n "$CODENAME" ]; then
+        sudo install -d /usr/share/postgresql-common/pgdg 2>/dev/null || true
+        sudo curl -fsSL -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \
+          https://www.postgresql.org/media/keys/ACCC4CF8.asc >/dev/null 2>&1 || true
+        echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${CODENAME}-pgdg main" \
+          | sudo tee /etc/apt/sources.list.d/pgdg.list >/dev/null 2>&1 || true
+        sudo apt-get update -qq >/dev/null 2>&1 || true
+      fi
+      install_pgvector || warn "pgvector still unavailable (alternative: install Docker and re-run)"
+    fi
+    ls /usr/share/postgresql/*/extension/vector.control >/dev/null 2>&1 \
+      && ok "pgvector available" || warn "pgvector still missing - the schema step will fail"
+  else
+    ok "pgvector already available"
+  fi
+fi
+
 # For a local/native Postgres: give this OS user a role + the database (peer auth on the socket).
 if pg_ready && [ "$DB_URL" = "dbname=$DB" ]; then
   sudo -u postgres psql -tAc "SELECT 1 FROM pg_roles WHERE rolname='$USER'" 2>/dev/null | grep -q 1 \
@@ -217,7 +254,19 @@ PY
     warn "embedding dimension changed ($CUR_DIM -> ${EMBED_DIM}) - recreating schema"
     .venv/bin/python -c "import os,psycopg;c=psycopg.connect(os.environ['DATABASE_URL']);cur=c.cursor();cur.execute('DROP TABLE IF EXISTS chunks CASCADE');cur.execute('DROP TABLE IF EXISTS files CASCADE');c.commit()" 2>/dev/null || true
   fi
-  .venv/bin/python cli.py init-db && ok "schema ready"
+  if .venv/bin/python cli.py init-db; then
+    ok "schema ready"
+  else
+    die "Database schema failed — the pgvector 'vector' extension is not available.
+       This install cannot work without it, so stopping here instead of finishing 'green'.
+       Fix it one of these ways, then re-run ./install.sh:
+         - Ubuntu/Debian: install pgvector from the official PGDG apt repo
+           (https://wiki.postgresql.org/wiki/Apt), i.e. the postgresql-<ver>-pgvector package;
+         - or install Docker and re-run — this script then uses the bundled pgvector image."
+  fi
+else
+  die "No reachable PostgreSQL — cannot create the schema.
+       Install PostgreSQL + pgvector (or Docker) and re-run ./install.sh."
 fi
 
 # 7) notes folder (empty, or seeded with bundled examples) ------------------

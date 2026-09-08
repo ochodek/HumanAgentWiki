@@ -23,8 +23,8 @@ jobs:
           --health-retries 5
     env:
       DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/humanagentwiki
-      HF_HUB_OFFLINE: "1"
-      TRANSFORMERS_OFFLINE: "1"
+      EMBED_MODEL: sentence-transformers/all-MiniLM-L6-v2
+      EMBED_DIM: "384"
       TOKENIZERS_PARALLELISM: "false"
 
     steps:
@@ -39,7 +39,7 @@ jobs:
           python -m pip install -r requirements-dev.txt
           python -m playwright install --with-deps chromium
       - name: Initialize disposable database
-        run: psql "$DATABASE_URL" -v ON_ERROR_STOP=1 -f schema.sql
+        run: python cli.py init-db
       - name: Run full unit suite
         run: python -m pytest
       - name: Run production browser delivery gate
