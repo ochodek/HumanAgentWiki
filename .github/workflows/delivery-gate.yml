@@ -1,8 +1,7 @@
 name: Delivery gate
 
 on:
-  push:
-  pull_request:
+  workflow_dispatch:
 
 jobs:
   test-and-browser-gate:

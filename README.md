@@ -106,6 +106,11 @@ pip install -r requirements-dev.txt
 pytest        # unit tests for the pure helpers (no DB needed)
 ```
 
+The delivery workflow is manual (`workflow_dispatch`) to keep GitHub Actions
+usage under the owner's control. A push or pull request does not run it.
+The existing browser gate uses a disposable database and notes directory;
+never point its write scenarios at the live shared memory.
+
 ## Persistent macOS runtime
 
 The repository includes `scripts/ensure-runtime.sh` and launchd templates in
