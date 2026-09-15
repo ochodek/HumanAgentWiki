@@ -14,7 +14,6 @@ WEB_LABEL="${WEB_LABEL:-com.jarvis.humanagentwiki.web}"
 COLIMA_PLIST="${COLIMA_PLIST:-$HOME/Library/LaunchAgents/homebrew.mxcl.colima.plist}"
 ATTEMPTS="${HAW_RUNTIME_ATTEMPTS:-30}"
 INTERVAL="${HAW_RUNTIME_INTERVAL_SECONDS:-2}"
-RUNTIME_SERVICE_MODE="${HAW_RUNTIME_SERVICE_MODE:-gui}"
 DOMAIN="gui/$(/usr/bin/id -u)"
 
 log() {
@@ -92,11 +91,6 @@ ensure_interface() {
     return 0
   fi
 
-  if [[ "$RUNTIME_SERVICE_MODE" == "system" ]]; then
-    log "HumanAgentWiki $name is unavailable; system launchd must restore it."
-    return 1
-  fi
-
   log "HumanAgentWiki $name is unavailable; restarting its LaunchAgent."
   "$LAUNCHCTL_BIN" kickstart -k "$DOMAIN/$label"
   wait_for_port "$port" || {
@@ -110,11 +104,6 @@ ensure_web() {
     return 0
   fi
 
-  if [[ "$RUNTIME_SERVICE_MODE" == "system" ]]; then
-    log "HumanAgentWiki web UI is unavailable; system launchd must restore it."
-    return 1
-  fi
-
   log "HumanAgentWiki web UI is unavailable; restarting its LaunchAgent."
   "$LAUNCHCTL_BIN" kickstart -k "$DOMAIN/$WEB_LABEL"
   wait_for_web || {
@@ -123,20 +112,7 @@ ensure_web() {
   }
 }
 
-case "$RUNTIME_SERVICE_MODE" in
-  gui|system) ;;
-  *)
-    log "HAW_RUNTIME_SERVICE_MODE must be either gui or system."
-    exit 2
-    ;;
-esac
-
 if ! wait_for_colima; then
-  if [[ "$RUNTIME_SERVICE_MODE" == "system" ]]; then
-    log "Colima did not become ready within the configured timeout; system launchd owns recovery."
-    exit 1
-  fi
-
   log "Colima is unavailable; requesting a normal LaunchAgent start."
   if ! "$LAUNCHCTL_BIN" kickstart "$DOMAIN/$COLIMA_LABEL"; then
     "$LAUNCHCTL_BIN" bootstrap "$DOMAIN" "$COLIMA_PLIST"
@@ -148,12 +124,7 @@ if ! wait_for_colima; then
   }
 fi
 
-if [[ "$RUNTIME_SERVICE_MODE" == "system" ]]; then
-  wait_for_docker || {
-    log "Docker did not become ready within the configured timeout; system launchd owns recovery."
-    exit 1
-  }
-elif ! "$DOCKER_BIN" info >/dev/null 2>&1; then
+if ! "$DOCKER_BIN" info >/dev/null 2>&1; then
   log "Docker is unavailable while Colima is running; requesting a graceful Colima restart."
   "$COLIMA_BIN" restart >/dev/null 2>&1 || {
     log "Colima rejected the graceful restart request."

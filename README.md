@@ -121,14 +121,6 @@ unavailable. It uses finite retries, verifies each restarted port before
 reporting a healthy runtime, and does not recreate or delete the PostgreSQL
 volume.
 
-Set `HAW_RUNTIME_SERVICE_MODE=system` only when system launchd units own the
-Colima, MCP, and web service lifetimes before user login. In this mode the
-watchdog waits for Colima and Docker, reconciles the existing PostgreSQL
-container, and verifies MCP and web readiness. It never invokes `launchctl` or
-restarts Colima; an unavailable dependency is logged and returned as a failure
-for the next periodic invocation. The default `gui` mode preserves the
-LaunchAgent recovery behavior above.
-
 On macOS, install or refresh all three services with:
 
 ```bash
