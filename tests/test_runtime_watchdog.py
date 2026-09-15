@@ -27,6 +27,8 @@ def _run_watchdog(
     docker_recovers: bool = True,
     database_ready: bool = True,
     database_recovers: bool = True,
+    runtime_service_mode: str | None = None,
+    allow_failure: bool = False,
 ) -> str:
     state = tmp_path / "colima-ready"
     docker_state = tmp_path / "docker-ready"
@@ -121,13 +123,19 @@ def _run_watchdog(
         "DATABASE_RECOVERS": "1" if database_recovers else "0",
         "CALLS_FILE": str(calls),
     }
+    if runtime_service_mode is not None:
+        env["HAW_RUNTIME_SERVICE_MODE"] = runtime_service_mode
+
     result = subprocess.run(
         [str(WATCHDOG)],
-        check=True,
+        check=not allow_failure,
         capture_output=True,
         text=True,
         env=env,
     )
+    if allow_failure and result.returncode == 0:
+        raise AssertionError("watchdog unexpectedly reported a healthy runtime")
+
     return calls.read_text(encoding="utf-8") + result.stdout
 
 
@@ -219,6 +227,59 @@ def test_watchdog_fails_loud_when_the_web_ui_does_not_recover(tmp_path: Path) ->
             web_ready=False,
             web_recovers=False,
         )
+
+
+def test_watchdog_rejects_an_unknown_runtime_service_mode(tmp_path: Path) -> None:
+    with pytest.raises(subprocess.CalledProcessError):
+        _run_watchdog(
+            tmp_path,
+            colima_ready=True,
+            runtime_service_mode="invalid",
+        )
+
+
+def test_system_mode_never_invokes_launchctl_for_a_healthy_runtime(tmp_path: Path) -> None:
+    output = _run_watchdog(
+        tmp_path,
+        colima_ready=True,
+        runtime_service_mode="system",
+    )
+
+    assert "launchctl" not in output
+    assert "colima restart" not in output
+    assert "docker compose up -d db" in output
+
+
+@pytest.mark.parametrize(
+    ("colima_ready", "docker_ready", "mcp_ready", "web_ready", "expected_message"),
+    [
+        (False, True, True, True, "Colima did not become ready"),
+        (True, False, True, True, "Docker did not become ready"),
+        (True, True, False, True, "MCP is unavailable; system launchd must restore it."),
+        (True, True, True, False, "web UI is unavailable; system launchd must restore it."),
+    ],
+)
+def test_system_mode_fails_without_restarting_launchd_owned_services(
+    tmp_path: Path,
+    colima_ready: bool,
+    docker_ready: bool,
+    mcp_ready: bool,
+    web_ready: bool,
+    expected_message: str,
+) -> None:
+    output = _run_watchdog(
+        tmp_path,
+        colima_ready=colima_ready,
+        docker_ready=docker_ready,
+        mcp_ready=mcp_ready,
+        web_ready=web_ready,
+        runtime_service_mode="system",
+        allow_failure=True,
+    )
+
+    assert expected_message in output
+    assert "launchctl" not in output
+    assert "colima restart" not in output
 
 
 def test_launch_agents_keep_both_agent_interfaces_running() -> None:
